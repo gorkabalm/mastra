@@ -1,5 +1,13 @@
+import type { ClickhouseTableEngineConfig } from '../../../db/engine';
+import { buildEngineClause, onClusterClause } from '../../../db/engine';
+
 /**
  * Raw DDL for ClickHouse v-next observability tables.
+ *
+ * Each DDL is exposed as a `build…` function that takes the configured
+ * `ClickhouseTableEngineConfig` so engine clauses (`ENGINE = …`) and
+ * `ON CLUSTER` fan-out are baked into the SQL at construction time, not via
+ * post-hoc string rewriting.
  *
  * Column ordering convention:
  *   1. Identity (dedupeKey for tracing)
@@ -66,8 +74,8 @@ export const BRANCH_SPAN_TYPE_VALUES = [
 // span_events — completed spans, ReplacingMergeTree (dedupeKey)
 // ---------------------------------------------------------------------------
 
-export const SPAN_EVENTS_DDL = `
-CREATE TABLE IF NOT EXISTS ${TABLE_SPAN_EVENTS} (
+export const buildSpanEventsDDL = (engine: ClickhouseTableEngineConfig): string => `
+CREATE TABLE IF NOT EXISTS ${TABLE_SPAN_EVENTS}${onClusterClause(engine)} (
   -- Identity
   dedupeKey          String,
 
@@ -128,7 +136,7 @@ CREATE TABLE IF NOT EXISTS ${TABLE_SPAN_EVENTS} (
   metadataRaw        Nullable(String),
   requestContext     Nullable(String)
 )
-ENGINE = ReplacingMergeTree
+ENGINE = ${buildEngineClause(TABLE_SPAN_EVENTS, 'ReplacingMergeTree', engine)}
 PARTITION BY toDate(endedAt)
 ORDER BY (traceId, endedAt, spanId, dedupeKey)
 `;
@@ -137,8 +145,8 @@ ORDER BY (traceId, endedAt, spanId, dedupeKey)
 // trace_roots — root spans only, populated by incremental MV
 // ---------------------------------------------------------------------------
 
-export const TRACE_ROOTS_DDL = `
-CREATE TABLE IF NOT EXISTS ${TABLE_TRACE_ROOTS} (
+export const buildTraceRootsDDL = (engine: ClickhouseTableEngineConfig): string => `
+CREATE TABLE IF NOT EXISTS ${TABLE_TRACE_ROOTS}${onClusterClause(engine)} (
   -- Identity
   dedupeKey          String,
 
@@ -199,7 +207,7 @@ CREATE TABLE IF NOT EXISTS ${TABLE_TRACE_ROOTS} (
   metadataRaw        Nullable(String),
   requestContext     Nullable(String)
 )
-ENGINE = ReplacingMergeTree
+ENGINE = ${buildEngineClause(TABLE_TRACE_ROOTS, 'ReplacingMergeTree', engine)}
 PARTITION BY toDate(endedAt)
 ORDER BY (startedAt, traceId, dedupeKey)
 `;
@@ -208,8 +216,8 @@ ORDER BY (startedAt, traceId, dedupeKey)
 // MV: span_events → trace_roots (root spans only, incremental)
 // ---------------------------------------------------------------------------
 
-export const TRACE_ROOTS_MV_DDL = `
-CREATE MATERIALIZED VIEW IF NOT EXISTS ${MV_TRACE_ROOTS}
+export const buildTraceRootsMVDDL = (engine: ClickhouseTableEngineConfig): string => `
+CREATE MATERIALIZED VIEW IF NOT EXISTS ${MV_TRACE_ROOTS}${onClusterClause(engine)}
 TO ${TABLE_TRACE_ROOTS}
 AS
 SELECT *
@@ -229,8 +237,8 @@ WHERE parentSpanId IS NULL
 // single anchor into its subtree.
 // ---------------------------------------------------------------------------
 
-export const TRACE_BRANCHES_DDL = `
-CREATE TABLE IF NOT EXISTS ${TABLE_TRACE_BRANCHES} (
+export const buildTraceBranchesDDL = (engine: ClickhouseTableEngineConfig): string => `
+CREATE TABLE IF NOT EXISTS ${TABLE_TRACE_BRANCHES}${onClusterClause(engine)} (
   -- Identity
   dedupeKey          String,
 
@@ -291,7 +299,7 @@ CREATE TABLE IF NOT EXISTS ${TABLE_TRACE_BRANCHES} (
   metadataRaw        Nullable(String),
   requestContext     Nullable(String)
 )
-ENGINE = ReplacingMergeTree
+ENGINE = ${buildEngineClause(TABLE_TRACE_BRANCHES, 'ReplacingMergeTree', engine)}
 PARTITION BY toDate(endedAt)
 ORDER BY (spanType, startedAt, traceId, dedupeKey)
 `;
@@ -300,8 +308,8 @@ ORDER BY (spanType, startedAt, traceId, dedupeKey)
 // MV: span_events → trace_branches (only branch-anchor span types, incremental)
 // ---------------------------------------------------------------------------
 
-export const TRACE_BRANCHES_MV_DDL = `
-CREATE MATERIALIZED VIEW IF NOT EXISTS ${MV_TRACE_BRANCHES}
+export const buildTraceBranchesMVDDL = (engine: ClickhouseTableEngineConfig): string => `
+CREATE MATERIALIZED VIEW IF NOT EXISTS ${MV_TRACE_BRANCHES}${onClusterClause(engine)}
 TO ${TABLE_TRACE_BRANCHES}
 AS
 SELECT *
@@ -313,8 +321,8 @@ WHERE spanType IN (${BRANCH_SPAN_TYPE_VALUES.map(v => `'${v}'`).join(', ')})
 // metric_events — ReplacingMergeTree with metricId dedup
 // ---------------------------------------------------------------------------
 
-export const METRIC_EVENTS_DDL = `
-CREATE TABLE IF NOT EXISTS ${TABLE_METRIC_EVENTS} (
+export const buildMetricEventsDDL = (engine: ClickhouseTableEngineConfig): string => `
+CREATE TABLE IF NOT EXISTS ${TABLE_METRIC_EVENTS}${onClusterClause(engine)} (
   -- Timestamp
   timestamp          DateTime64(3, 'UTC'),
 
@@ -382,7 +390,7 @@ CREATE TABLE IF NOT EXISTS ${TABLE_METRIC_EVENTS} (
   INDEX idx_sessionId sessionId TYPE bloom_filter(0.01) GRANULARITY 2,
   INDEX idx_requestId requestId TYPE bloom_filter(0.01) GRANULARITY 2
 )
-ENGINE = ReplacingMergeTree
+ENGINE = ${buildEngineClause(TABLE_METRIC_EVENTS, 'ReplacingMergeTree', engine)}
 PARTITION BY toDate(timestamp)
 ORDER BY (name, timestamp, metricId)
 `;
@@ -391,8 +399,8 @@ ORDER BY (name, timestamp, metricId)
 // log_events — ReplacingMergeTree with logId dedup
 // ---------------------------------------------------------------------------
 
-export const LOG_EVENTS_DDL = `
-CREATE TABLE IF NOT EXISTS ${TABLE_LOG_EVENTS} (
+export const buildLogEventsDDL = (engine: ClickhouseTableEngineConfig): string => `
+CREATE TABLE IF NOT EXISTS ${TABLE_LOG_EVENTS}${onClusterClause(engine)} (
   -- Timestamp
   timestamp          DateTime64(3, 'UTC'),
 
@@ -440,7 +448,7 @@ CREATE TABLE IF NOT EXISTS ${TABLE_LOG_EVENTS} (
   metadata           Nullable(String),
   scope              Nullable(String)
 )
-ENGINE = ReplacingMergeTree
+ENGINE = ${buildEngineClause(TABLE_LOG_EVENTS, 'ReplacingMergeTree', engine)}
 PARTITION BY toDate(timestamp)
 ORDER BY (timestamp, logId)
 `;
@@ -449,8 +457,8 @@ ORDER BY (timestamp, logId)
 // score_events — ReplacingMergeTree with scoreId dedup
 // ---------------------------------------------------------------------------
 
-export const SCORE_EVENTS_DDL = `
-CREATE TABLE IF NOT EXISTS ${TABLE_SCORE_EVENTS} (
+export const buildScoreEventsDDL = (engine: ClickhouseTableEngineConfig): string => `
+CREATE TABLE IF NOT EXISTS ${TABLE_SCORE_EVENTS}${onClusterClause(engine)} (
   -- Timestamp
   timestamp          DateTime64(3, 'UTC'),
 
@@ -505,7 +513,7 @@ CREATE TABLE IF NOT EXISTS ${TABLE_SCORE_EVENTS} (
   metadata           Nullable(String),
   scope              Nullable(String)
 )
-ENGINE = ReplacingMergeTree
+ENGINE = ${buildEngineClause(TABLE_SCORE_EVENTS, 'ReplacingMergeTree', engine)}
 PARTITION BY toDate(timestamp)
 ORDER BY (traceId, timestamp, scoreId)
 SETTINGS allow_nullable_key = 1
@@ -515,8 +523,8 @@ SETTINGS allow_nullable_key = 1
 // feedback_events — ReplacingMergeTree with feedbackId dedup
 // ---------------------------------------------------------------------------
 
-export const FEEDBACK_EVENTS_DDL = `
-CREATE TABLE IF NOT EXISTS ${TABLE_FEEDBACK_EVENTS} (
+export const buildFeedbackEventsDDL = (engine: ClickhouseTableEngineConfig): string => `
+CREATE TABLE IF NOT EXISTS ${TABLE_FEEDBACK_EVENTS}${onClusterClause(engine)} (
   -- Timestamp
   timestamp          DateTime64(3, 'UTC'),
 
@@ -574,7 +582,7 @@ CREATE TABLE IF NOT EXISTS ${TABLE_FEEDBACK_EVENTS} (
   metadata           Nullable(String),
   scope              Nullable(String)
 )
-ENGINE = ReplacingMergeTree
+ENGINE = ${buildEngineClause(TABLE_FEEDBACK_EVENTS, 'ReplacingMergeTree', engine)}
 PARTITION BY toDate(timestamp)
 ORDER BY (traceId, timestamp, feedbackId)
 SETTINGS allow_nullable_key = 1
@@ -584,13 +592,13 @@ SETTINGS allow_nullable_key = 1
 // discovery_values — refreshable helper
 // ---------------------------------------------------------------------------
 
-export const DISCOVERY_VALUES_DDL = `
-CREATE TABLE IF NOT EXISTS ${TABLE_DISCOVERY_VALUES} (
+export const buildDiscoveryValuesDDL = (engine: ClickhouseTableEngineConfig): string => `
+CREATE TABLE IF NOT EXISTS ${TABLE_DISCOVERY_VALUES}${onClusterClause(engine)} (
   kind               LowCardinality(String),
   key1               String,
   value              String
 )
-ENGINE = MergeTree
+ENGINE = ${buildEngineClause(TABLE_DISCOVERY_VALUES, 'MergeTree', engine)}
 ORDER BY (kind, key1, value)
 `;
 
@@ -598,14 +606,14 @@ ORDER BY (kind, key1, value)
 // discovery_pairs — refreshable helper
 // ---------------------------------------------------------------------------
 
-export const DISCOVERY_PAIRS_DDL = `
-CREATE TABLE IF NOT EXISTS ${TABLE_DISCOVERY_PAIRS} (
+export const buildDiscoveryPairsDDL = (engine: ClickhouseTableEngineConfig): string => `
+CREATE TABLE IF NOT EXISTS ${TABLE_DISCOVERY_PAIRS}${onClusterClause(engine)} (
   kind               LowCardinality(String),
   key1               String,
   key2               String,
   value              String
 )
-ENGINE = MergeTree
+ENGINE = ${buildEngineClause(TABLE_DISCOVERY_PAIRS, 'MergeTree', engine)}
 ORDER BY (kind, key1, key2, value)
 `;
 
@@ -632,8 +640,8 @@ function unionDistinctFromSignals(
     .join(' UNION ALL ');
 }
 
-export const DISCOVERY_VALUES_MV_DDL = `
-CREATE MATERIALIZED VIEW IF NOT EXISTS ${MV_DISCOVERY_VALUES}
+export const buildDiscoveryValuesMVDDL = (engine: ClickhouseTableEngineConfig): string => `
+CREATE MATERIALIZED VIEW IF NOT EXISTS ${MV_DISCOVERY_VALUES}${onClusterClause(engine)}
 REFRESH EVERY 1 MINUTE
 TO ${TABLE_DISCOVERY_VALUES}
 AS
@@ -663,8 +671,8 @@ SELECT DISTINCT kind, key1, value FROM (
 // Source: span_events, metric_events, log_events (not scores/feedback)
 // ---------------------------------------------------------------------------
 
-export const DISCOVERY_PAIRS_MV_DDL = `
-CREATE MATERIALIZED VIEW IF NOT EXISTS ${MV_DISCOVERY_PAIRS}
+export const buildDiscoveryPairsMVDDL = (engine: ClickhouseTableEngineConfig): string => `
+CREATE MATERIALIZED VIEW IF NOT EXISTS ${MV_DISCOVERY_PAIRS}${onClusterClause(engine)}
 REFRESH EVERY 5 MINUTE
 TO ${TABLE_DISCOVERY_PAIRS}
 AS
@@ -687,22 +695,28 @@ SELECT DISTINCT kind, key1, key2, value FROM (
 // All DDL in creation order (tables first, then MVs)
 // ---------------------------------------------------------------------------
 
-export const ALL_TABLE_DDL = [
-  SPAN_EVENTS_DDL,
-  TRACE_ROOTS_DDL,
-  TRACE_BRANCHES_DDL,
-  METRIC_EVENTS_DDL,
-  LOG_EVENTS_DDL,
-  SCORE_EVENTS_DDL,
-  FEEDBACK_EVENTS_DDL,
-  DISCOVERY_VALUES_DDL,
-  DISCOVERY_PAIRS_DDL,
+export const buildAllTableDDL = (engine: ClickhouseTableEngineConfig): string[] => [
+  buildSpanEventsDDL(engine),
+  buildTraceRootsDDL(engine),
+  buildTraceBranchesDDL(engine),
+  buildMetricEventsDDL(engine),
+  buildLogEventsDDL(engine),
+  buildScoreEventsDDL(engine),
+  buildFeedbackEventsDDL(engine),
+  buildDiscoveryValuesDDL(engine),
+  buildDiscoveryPairsDDL(engine),
 ];
 
-export const ALL_MV_DDL = [TRACE_ROOTS_MV_DDL, TRACE_BRANCHES_MV_DDL];
+export const buildAllMVDDL = (engine: ClickhouseTableEngineConfig): string[] => [
+  buildTraceRootsMVDDL(engine),
+  buildTraceBranchesMVDDL(engine),
+];
 
 /** Discovery-specific refreshable MVs — created separately from core MVs. */
-export const DISCOVERY_MV_DDL = [DISCOVERY_VALUES_MV_DDL, DISCOVERY_PAIRS_MV_DDL];
+export const buildDiscoveryMVDDL = (engine: ClickhouseTableEngineConfig): string[] => [
+  buildDiscoveryValuesMVDDL(engine),
+  buildDiscoveryPairsMVDDL(engine),
+];
 
 /**
  * Additive migrations for existing ClickHouse databases.
@@ -718,59 +732,71 @@ export type MigrationEntry =
   | { kind: 'column'; table: string; name: string; sql: string }
   | { kind: 'index'; table: string; name: string; sql: string };
 
-const addColumn = (table: string, name: string, type: string): MigrationEntry => ({
-  kind: 'column',
-  table,
-  name,
-  sql: `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${name} ${type}`,
-});
+const addColumn =
+  (engine: ClickhouseTableEngineConfig) =>
+  (table: string, name: string, type: string): MigrationEntry => ({
+    kind: 'column',
+    table,
+    name,
+    sql: `ALTER TABLE ${table}${onClusterClause(engine)} ADD COLUMN IF NOT EXISTS ${name} ${type}`,
+  });
 
-const addBloomIndex = (table: string, name: string, column: string): MigrationEntry => ({
-  kind: 'index',
-  table,
-  name,
-  sql: `ALTER TABLE ${table} ADD INDEX IF NOT EXISTS ${name} ${column} TYPE bloom_filter(0.01) GRANULARITY 2`,
-});
+const addBloomIndex =
+  (engine: ClickhouseTableEngineConfig) =>
+  (table: string, name: string, column: string): MigrationEntry => ({
+    kind: 'index',
+    table,
+    name,
+    sql: `ALTER TABLE ${table}${onClusterClause(engine)} ADD INDEX IF NOT EXISTS ${name} ${column} TYPE bloom_filter(0.01) GRANULARITY 2`,
+  });
 
-export const ALL_MIGRATIONS: readonly MigrationEntry[] = [
-  // Span events
-  addColumn(TABLE_SPAN_EVENTS, 'entityVersionId', 'Nullable(String)'),
-  addColumn(TABLE_SPAN_EVENTS, 'parentEntityVersionId', 'Nullable(String)'),
-  addColumn(TABLE_SPAN_EVENTS, 'rootEntityVersionId', 'Nullable(String)'),
-  // Trace roots
-  addColumn(TABLE_TRACE_ROOTS, 'entityVersionId', 'Nullable(String)'),
-  addColumn(TABLE_TRACE_ROOTS, 'parentEntityVersionId', 'Nullable(String)'),
-  addColumn(TABLE_TRACE_ROOTS, 'rootEntityVersionId', 'Nullable(String)'),
-  // Metrics
-  addColumn(TABLE_METRIC_EVENTS, 'entityVersionId', 'Nullable(String)'),
-  addColumn(TABLE_METRIC_EVENTS, 'parentEntityVersionId', 'Nullable(String)'),
-  addColumn(TABLE_METRIC_EVENTS, 'rootEntityVersionId', 'Nullable(String)'),
-  // Logs
-  addColumn(TABLE_LOG_EVENTS, 'entityVersionId', 'Nullable(String)'),
-  addColumn(TABLE_LOG_EVENTS, 'parentEntityVersionId', 'Nullable(String)'),
-  addColumn(TABLE_LOG_EVENTS, 'rootEntityVersionId', 'Nullable(String)'),
-  // Scores
-  addColumn(TABLE_SCORE_EVENTS, 'entityVersionId', 'Nullable(String)'),
-  addColumn(TABLE_SCORE_EVENTS, 'parentEntityVersionId', 'Nullable(String)'),
-  addColumn(TABLE_SCORE_EVENTS, 'rootEntityVersionId', 'Nullable(String)'),
-  // Feedback
-  addColumn(TABLE_FEEDBACK_EVENTS, 'entityVersionId', 'Nullable(String)'),
-  addColumn(TABLE_FEEDBACK_EVENTS, 'parentEntityVersionId', 'Nullable(String)'),
-  addColumn(TABLE_FEEDBACK_EVENTS, 'rootEntityVersionId', 'Nullable(String)'),
-  // Metric skip indexes — additive, instant DDL. Existing parts keep no index
-  // until merged or `MATERIALIZE INDEX` is run; new parts are bloom-filtered
-  // immediately. With normal retention turning over the table, the index
-  // converges to full coverage without an explicit backfill.
-  addBloomIndex(TABLE_METRIC_EVENTS, 'idx_traceId', 'traceId'),
-  addBloomIndex(TABLE_METRIC_EVENTS, 'idx_threadId', 'threadId'),
-  addBloomIndex(TABLE_METRIC_EVENTS, 'idx_resourceId', 'resourceId'),
-  addBloomIndex(TABLE_METRIC_EVENTS, 'idx_userId', 'userId'),
-  addBloomIndex(TABLE_METRIC_EVENTS, 'idx_organizationId', 'organizationId'),
-  addBloomIndex(TABLE_METRIC_EVENTS, 'idx_experimentId', 'experimentId'),
-  addBloomIndex(TABLE_METRIC_EVENTS, 'idx_runId', 'runId'),
-  addBloomIndex(TABLE_METRIC_EVENTS, 'idx_sessionId', 'sessionId'),
-  addBloomIndex(TABLE_METRIC_EVENTS, 'idx_requestId', 'requestId'),
-];
+/**
+ * Builds the additive migration plan. `engine` controls whether each `ALTER
+ * TABLE` includes `ON CLUSTER` when running against a replicated cluster.
+ */
+export const buildAllMigrations = (engine: ClickhouseTableEngineConfig): readonly MigrationEntry[] => {
+  const col = addColumn(engine);
+  const idx = addBloomIndex(engine);
+  return [
+    // Span events
+    col(TABLE_SPAN_EVENTS, 'entityVersionId', 'Nullable(String)'),
+    col(TABLE_SPAN_EVENTS, 'parentEntityVersionId', 'Nullable(String)'),
+    col(TABLE_SPAN_EVENTS, 'rootEntityVersionId', 'Nullable(String)'),
+    // Trace roots
+    col(TABLE_TRACE_ROOTS, 'entityVersionId', 'Nullable(String)'),
+    col(TABLE_TRACE_ROOTS, 'parentEntityVersionId', 'Nullable(String)'),
+    col(TABLE_TRACE_ROOTS, 'rootEntityVersionId', 'Nullable(String)'),
+    // Metrics
+    col(TABLE_METRIC_EVENTS, 'entityVersionId', 'Nullable(String)'),
+    col(TABLE_METRIC_EVENTS, 'parentEntityVersionId', 'Nullable(String)'),
+    col(TABLE_METRIC_EVENTS, 'rootEntityVersionId', 'Nullable(String)'),
+    // Logs
+    col(TABLE_LOG_EVENTS, 'entityVersionId', 'Nullable(String)'),
+    col(TABLE_LOG_EVENTS, 'parentEntityVersionId', 'Nullable(String)'),
+    col(TABLE_LOG_EVENTS, 'rootEntityVersionId', 'Nullable(String)'),
+    // Scores
+    col(TABLE_SCORE_EVENTS, 'entityVersionId', 'Nullable(String)'),
+    col(TABLE_SCORE_EVENTS, 'parentEntityVersionId', 'Nullable(String)'),
+    col(TABLE_SCORE_EVENTS, 'rootEntityVersionId', 'Nullable(String)'),
+    // Feedback
+    col(TABLE_FEEDBACK_EVENTS, 'entityVersionId', 'Nullable(String)'),
+    col(TABLE_FEEDBACK_EVENTS, 'parentEntityVersionId', 'Nullable(String)'),
+    col(TABLE_FEEDBACK_EVENTS, 'rootEntityVersionId', 'Nullable(String)'),
+    // Metric skip indexes — additive, instant DDL. Existing parts keep no index
+    // until merged or `MATERIALIZE INDEX` is run; new parts are bloom-filtered
+    // immediately. With normal retention turning over the table, the index
+    // converges to full coverage without an explicit backfill.
+    idx(TABLE_METRIC_EVENTS, 'idx_traceId', 'traceId'),
+    idx(TABLE_METRIC_EVENTS, 'idx_threadId', 'threadId'),
+    idx(TABLE_METRIC_EVENTS, 'idx_resourceId', 'resourceId'),
+    idx(TABLE_METRIC_EVENTS, 'idx_userId', 'userId'),
+    idx(TABLE_METRIC_EVENTS, 'idx_organizationId', 'organizationId'),
+    idx(TABLE_METRIC_EVENTS, 'idx_experimentId', 'experimentId'),
+    idx(TABLE_METRIC_EVENTS, 'idx_runId', 'runId'),
+    idx(TABLE_METRIC_EVENTS, 'idx_sessionId', 'sessionId'),
+    idx(TABLE_METRIC_EVENTS, 'idx_requestId', 'requestId'),
+  ];
+};
 
 /**
  * Names of the bloom-filter skip indexes added to `metric_events`. Exposed so
@@ -789,7 +815,11 @@ export const METRIC_SKIP_INDEX_NAMES = [
   'idx_requestId',
 ] as const;
 
-export const ALL_DDL = [...ALL_TABLE_DDL, ...ALL_MV_DDL, ...DISCOVERY_MV_DDL];
+export const buildAllDDL = (engine: ClickhouseTableEngineConfig): string[] => [
+  ...buildAllTableDDL(engine),
+  ...buildAllMVDDL(engine),
+  ...buildDiscoveryMVDDL(engine),
+];
 
 export const ALL_TABLE_NAMES = [
   TABLE_SPAN_EVENTS,
@@ -860,8 +890,12 @@ export interface RetentionEntry {
   sql: string;
 }
 
-export function buildRetentionEntries(retention: RetentionConfig): RetentionEntry[] {
+export function buildRetentionEntries(
+  retention: RetentionConfig,
+  engine: ClickhouseTableEngineConfig,
+): RetentionEntry[] {
   const entries: RetentionEntry[] = [];
+  const c = onClusterClause(engine);
 
   for (const [signal, days] of Object.entries(retention)) {
     const safeDays = Math.floor(Number(days));
@@ -877,7 +911,7 @@ export function buildRetentionEntries(retention: RetentionConfig): RetentionEntr
         table,
         column: col,
         days: safeDays,
-        sql: `ALTER TABLE ${table} MODIFY TTL ${col} + INTERVAL ${safeDays} DAY`,
+        sql: `ALTER TABLE ${table}${c} MODIFY TTL ${col} + INTERVAL ${safeDays} DAY`,
       });
     }
   }
@@ -891,8 +925,8 @@ export function buildRetentionEntries(retention: RetentionConfig): RetentionEntr
  *
  * Uses `MODIFY TTL` so re-running init is idempotent (overwrites any previous TTL).
  */
-export function buildRetentionDDL(retention: RetentionConfig): string[] {
-  return buildRetentionEntries(retention).map(e => e.sql);
+export function buildRetentionDDL(retention: RetentionConfig, engine: ClickhouseTableEngineConfig): string[] {
+  return buildRetentionEntries(retention, engine).map(e => e.sql);
 }
 
 /**

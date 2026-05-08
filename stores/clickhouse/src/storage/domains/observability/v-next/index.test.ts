@@ -13,7 +13,10 @@
 import { createClient } from '@clickhouse/client';
 import { EntityType, SpanType } from '@mastra/core/observability';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ALL_MIGRATIONS, buildRetentionDDL, buildRetentionEntries, parseTtlExpression } from './ddl';
+import { buildAllMigrations, buildRetentionDDL, buildRetentionEntries, parseTtlExpression } from './ddl';
+
+// Convenience alias for tests that don't care about engine mode.
+const ALL_MIGRATIONS = buildAllMigrations({ type: 'default' });
 import { ObservabilityStorageClickhouseVNext } from '.';
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
@@ -4020,12 +4023,14 @@ describe('ObservabilityStorageClickhouseVNext', () => {
   describe('retention / TTL', () => {
     // --- Unit tests for buildRetentionDDL ---
 
+    const defaultEngine = { type: 'default' } as const;
+
     it('buildRetentionDDL generates no statements when config is empty', () => {
-      expect(buildRetentionDDL({})).toEqual([]);
+      expect(buildRetentionDDL({}, defaultEngine)).toEqual([]);
     });
 
     it('buildRetentionDDL generates tracing TTL for span_events, trace_roots, and trace_branches', () => {
-      const stmts = buildRetentionDDL({ tracing: 30 });
+      const stmts = buildRetentionDDL({ tracing: 30 }, defaultEngine);
       expect(stmts).toHaveLength(3);
       expect(stmts[0]).toBe('ALTER TABLE mastra_span_events MODIFY TTL endedAt + INTERVAL 30 DAY');
       expect(stmts[1]).toBe('ALTER TABLE mastra_trace_roots MODIFY TTL endedAt + INTERVAL 30 DAY');
@@ -4033,7 +4038,7 @@ describe('ObservabilityStorageClickhouseVNext', () => {
     });
 
     it('buildRetentionDDL generates per-signal TTL statements', () => {
-      const stmts = buildRetentionDDL({ logs: 7, metrics: 14, scores: 90, feedback: 60 });
+      const stmts = buildRetentionDDL({ logs: 7, metrics: 14, scores: 90, feedback: 60 }, defaultEngine);
       expect(stmts).toHaveLength(4);
       expect(stmts).toContain('ALTER TABLE mastra_log_events MODIFY TTL timestamp + INTERVAL 7 DAY');
       expect(stmts).toContain('ALTER TABLE mastra_metric_events MODIFY TTL timestamp + INTERVAL 14 DAY');
@@ -4042,29 +4047,40 @@ describe('ObservabilityStorageClickhouseVNext', () => {
     });
 
     it('buildRetentionDDL skips zero, negative, and non-numeric values', () => {
-      const stmts = buildRetentionDDL({
-        tracing: 0,
-        logs: -5,
-        metrics: NaN,
-        scores: undefined,
-        feedback: 10,
-      } as any);
+      const stmts = buildRetentionDDL(
+        {
+          tracing: 0,
+          logs: -5,
+          metrics: NaN,
+          scores: undefined,
+          feedback: 10,
+        } as any,
+        defaultEngine,
+      );
       expect(stmts).toHaveLength(1);
       expect(stmts[0]).toBe('ALTER TABLE mastra_feedback_events MODIFY TTL timestamp + INTERVAL 10 DAY');
     });
 
     it('buildRetentionDDL floors fractional days', () => {
-      const stmts = buildRetentionDDL({ logs: 7.9 });
+      const stmts = buildRetentionDDL({ logs: 7.9 }, defaultEngine);
       expect(stmts).toHaveLength(1);
       expect(stmts[0]).toBe('ALTER TABLE mastra_log_events MODIFY TTL timestamp + INTERVAL 7 DAY');
+    });
+
+    it('buildRetentionDDL emits ON CLUSTER for replicated mode with cluster', () => {
+      const stmts = buildRetentionDDL({ logs: 7 }, { type: 'replicated', cluster: 'prod_cluster' });
+      expect(stmts).toHaveLength(1);
+      expect(stmts[0]).toBe(
+        "ALTER TABLE mastra_log_events ON CLUSTER 'prod_cluster' MODIFY TTL timestamp + INTERVAL 7 DAY",
+      );
     });
 
     // --- Unit tests for buildRetentionEntries ---
 
     it('buildRetentionEntries returns structured entries whose sql matches buildRetentionDDL', () => {
       const config = { tracing: 30, logs: 7, metrics: 14 };
-      const entries = buildRetentionEntries(config);
-      const ddl = buildRetentionDDL(config);
+      const entries = buildRetentionEntries(config, defaultEngine);
+      const ddl = buildRetentionDDL(config, defaultEngine);
       expect(entries).toHaveLength(ddl.length);
       expect(entries.map(e => e.sql)).toEqual(ddl);
       for (const entry of entries) {
