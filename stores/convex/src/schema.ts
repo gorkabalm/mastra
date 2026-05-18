@@ -194,8 +194,8 @@ export function defineMastraNativeVectorTable({
   vectorIndexName = 'by_embedding',
   staged = false,
 }: MastraNativeVectorTableConfig) {
-  if (!Number.isInteger(dimensions) || dimensions < 2 || dimensions > 4096) {
-    throw new Error('defineMastraNativeVectorTable: dimensions must be an integer between 2 and 4096.');
+  if (!Number.isInteger(dimensions) || dimensions < 2 || dimensions > 2048) {
+    throw new Error('defineMastraNativeVectorTable: dimensions must be an integer between 2 and 2048.');
   }
 
   const table = defineTable({
