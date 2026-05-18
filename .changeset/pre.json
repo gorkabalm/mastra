@@ -146,6 +146,7 @@
   },
   "changesets": [
     "automated-provider-registry-20260516-010339",
+    "calm-pandas-wave",
     "cozy-walls-teach",
     "fix-mcp-sse-transport-cleanup",
     "goofy-lines-fail",
@@ -155,15 +156,18 @@
     "internal-usage-attribute",
     "jolly-games-cheer",
     "moody-bottles-turn",
+    "quiet-deer-rest",
     "quiet-stagehand-logs",
     "responsive-prompts-workflows-toparea",
     "rollup-internal-usage",
     "seven-boats-like",
     "shared-skill-formatter",
     "signals-narrow-contents",
+    "silver-otters-drift",
     "slick-games-stand",
     "storage-init-retry-on-rejection",
     "ten-mangos-follow",
-    "whole-results-give"
+    "whole-results-give",
+    "wise-foxes-stream"
   ]
 }

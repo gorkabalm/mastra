@@ -1,5 +1,12 @@
 # mastracode
 
+## 0.20.0-alpha.4
+
+### Patch Changes
+
+- Updated dependencies:
+  - @mastra/core@1.36.0-alpha.2
+
 ## 0.20.0-alpha.3
 
 ### Patch Changes

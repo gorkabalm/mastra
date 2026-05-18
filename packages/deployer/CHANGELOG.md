@@ -1,5 +1,15 @@
 # @mastra/deployer
 
+## 1.36.0-alpha.2
+
+### Patch Changes
+
+- When browser streaming is unavailable (the `ws` and `@hono/node-ws` packages aren't installed, or the deployer is running in a serverless environment), the deployer now registers a fallback `GET /api/agents/:agentId/browser/session` route that returns `{ hasSession: false, screencastAvailable: false }`. This lets clients detect that screencast won't work and skip the WebSocket upgrade instead of triggering a noisy reconnect loop. ([#16668](https://github.com/mastra-ai/mastra/pull/16668))
+
+- Updated dependencies:
+  - @mastra/core@1.36.0-alpha.2
+  - @mastra/server@1.36.0-alpha.2
+
 ## 1.36.0-alpha.1
 
 ### Minor Changes

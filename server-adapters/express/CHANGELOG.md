@@ -1,5 +1,13 @@
 # @mastra/express
 
+## 1.3.23-alpha.2
+
+### Patch Changes
+
+- Updated dependencies:
+  - @mastra/core@1.36.0-alpha.2
+  - @mastra/server@1.36.0-alpha.2
+
 ## 1.3.23-alpha.1
 
 ### Patch Changes
